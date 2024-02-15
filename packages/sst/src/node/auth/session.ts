@@ -16,44 +16,48 @@ export type SessionValue = {
   };
 }[keyof SessionTypes];
 
-const SessionMemo = /* @__PURE__ */ Context.memo(() => {
-  // Get the context type and hooks that match that type
-  let token = "";
+const DEFAULT_COOKIE_NAME = "auth-token";
 
-  const header = useHeader("authorization")!;
-  if (header) token = header.substring(7);
+const SessionMemo = /* @__PURE__ */ (cookieName: string) => {
+  return Context.memo(() => {
+    // Get the context type and hooks that match that type
+    let token = "";
 
-  const ctxType = useContextType();
-  const cookie = ctxType === "api" ? useCookie("auth-token") : undefined;
-  if (cookie) token = cookie;
+    const header = useHeader("authorization")!;
+    if (header) token = header.substring(7);
 
-  // WebSocket may also set the token in the protocol header
-  // TODO: Once https://github.com/sst/sst/pull/2838 is merged,
-  // then we should no longer need to check both casing for the header.
-  const wsProtocol =
-    ctxType === "ws"
-      ? useHeader("sec-websocket-protocol") ||
-        useHeader("Sec-WebSocket-Protocol")
-      : undefined;
-  if (wsProtocol) token = wsProtocol.split(",")[0].trim();
+    const ctxType = useContextType();
+    const cookie = ctxType === "api" ? useCookie(cookieName) : undefined;
+    if (cookie) token = cookie;
 
-  if (token) {
-    const jwt = createVerifier({
-      algorithms: ["RS512"],
-      key: getPublicKey(),
-    })(token);
-    return jwt;
-  }
+    // WebSocket may also set the token in the protocol header
+    // TODO: Once https://github.com/sst/sst/pull/2838 is merged,
+    // then we should no longer need to check both casing for the header.
+    const wsProtocol =
+        ctxType === "ws"
+            ? useHeader("sec-websocket-protocol") ||
+            useHeader("Sec-WebSocket-Protocol")
+            : undefined;
+    if (wsProtocol) token = wsProtocol.split(",")[0].trim();
 
-  return {
-    type: "public",
-    properties: {},
-  };
-});
+    if (token) {
+      const jwt = createVerifier({
+        algorithms: ["RS512"],
+        key: getPublicKey(),
+      })(token);
+      return jwt;
+    }
+
+    return {
+      type: "public",
+      properties: {},
+    };
+  })
+};
 
 // This is a crazy TS hack to prevent the types from being evaluated too soon
-export function useSession<T = SessionValue>() {
-  const ctx = SessionMemo();
+export function useSession<T = SessionValue>(cookieName= DEFAULT_COOKIE_NAME) {
+  const ctx = SessionMemo(cookieName);
   return ctx as T;
 }
 
@@ -106,6 +110,7 @@ export function cookie<T extends keyof SessionTypes>(input: {
   properties: SessionTypes[T];
   redirect: string;
   options?: Partial<SignerOptions>;
+  cookieName?: string;
 }): APIGatewayProxyStructuredResultV2 {
   const token = create(input);
   const expires = new Date(
@@ -117,7 +122,7 @@ export function cookie<T extends keyof SessionTypes>(input: {
       location: input.redirect,
     },
     cookies: [
-      `auth-token=${token}; HttpOnly; SameSite=None; Secure; Path=/; Expires=${expires}`,
+      `${input.cookieName || DEFAULT_COOKIE_NAME}=${token}; HttpOnly; SameSite=None; Secure; Path=/; Expires=${expires}`,
     ],
   };
 }
